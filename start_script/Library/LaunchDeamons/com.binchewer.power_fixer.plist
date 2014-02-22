@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+File name: com.binchewer.power_fixer.plist
+Placed in /Library/LaunchDaemons/
+Ensure plist file and program are both owned by root and executable
+-->
+<dict>
+<key>Label</key>
+<string>com.binchewer.power_fixer</string>
+<key>Program</key>
+<string>/usr/local/power_fixer/bin/power_fixer</string>
+<key>RunAtLoad</key>
+<true/>
+</dict>
+</plist>
