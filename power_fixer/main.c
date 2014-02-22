@@ -10,7 +10,7 @@
 
 typedef struct kinfo_proc kinfo_proc;
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 #define LOG_ERROR(fmt, ...) fprintf(stderr, "[ERROR] " fmt " (%s, %d)\n", ## __VA_ARGS__, __func__, __LINE__);
 
 vm_map_t loginwindow_task;
@@ -148,7 +148,7 @@ static int readmem(mach_vm_address_t address, mach_vm_size_t size, mach_vm_offse
 
 static int write_memory_int(uint64_t opts_address, uint64_t value)
 {
-    printf("Writing value %08llx to address %llx.\n", value, opts_address);
+    printf("Writing value to address %llx.\n", opts_address);
     kern_return_t kr = 0;
     /* get original memory protection */
     mach_vm_size_t size = 0;
@@ -178,6 +178,48 @@ static int write_memory_int(uint64_t opts_address, uint64_t value)
     }
     /* restore original protection */
     if ( (kr = mach_vm_protect(loginwindow_task, opts_address, (mach_msg_type_number_t)4, FALSE, info.protection)) )
+    {
+        LOG_ERROR("mach_vm_protect failed with error %d.", kr);
+        return 0;
+    }
+    task_resume(loginwindow_task);
+    return 1;
+}
+
+
+
+static int write_memory_char_n(uint64_t opts_address, uint8_t char_nums, char *char8)
+{
+    printf("Writing value to address %llx.\n", opts_address);
+    kern_return_t kr = 0;
+    /* get original memory protection */
+    mach_vm_size_t size = 0;
+    mach_port_t object_name = 0;
+    vm_region_basic_info_data_64_t info = {0};
+    mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+    /* mach_vm_region will return the address of the map into the address argument so we need to make a copy */
+    mach_vm_address_t dummyadr = opts_address;
+    if ( (kr = mach_vm_region(loginwindow_task, &dummyadr, &size, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&info, &count, &object_name)) )
+    {
+        LOG_ERROR("mach_vm_region failed with error %d", kr);
+        return 0;
+    }
+
+    /* change protections, write, and restore original protection */
+    task_suspend(loginwindow_task);
+    if ( (kr = mach_vm_protect(loginwindow_task, opts_address, (mach_msg_type_number_t)char_nums, FALSE, VM_PROT_WRITE | VM_PROT_READ | VM_PROT_COPY)) )
+    {
+        LOG_ERROR("mach_vm_protect failed with error %d.", kr);
+        return 0;
+    }
+
+    if ( (kr = mach_vm_write(loginwindow_task, opts_address, (vm_offset_t)char8, (mach_msg_type_number_t)char_nums)) )
+    {
+        LOG_ERROR("mach_vm_write failed at 0x%llx with error %d.", opts_address, kr);
+        return 0;
+    }
+    /* restore original protection */
+    if ( (kr = mach_vm_protect(loginwindow_task, opts_address, (mach_msg_type_number_t)char_nums, FALSE, info.protection)) )
     {
         LOG_ERROR("mach_vm_protect failed with error %d.", kr);
         return 0;
@@ -378,6 +420,30 @@ static uint64_t find_patch_place()
     return patch_place - text_section;
 }
 
+//returns the offset to instruction 'call sub_10003dcb5' within __text section
+static uint64_t find_patch_place2()
+{
+    uint8_t **matches = 0;
+    uint32_t count = 0;
+    uint32_t found_count = 0;
+    uint8_t *patch_place = 0;
+    find_binary_pattern("\xE8\x7A\x0C\xFF\xFF\xEB\x6D\x48", 8, &matches, &count, 0);
+    found_count = count;
+    patch_place = matches[0];
+    if (found_count == 0)
+    {
+        LOG_ERROR("No call sub_10003dcb5. Patched already?");
+        return 0;
+    }
+    if (found_count > 1)
+    {
+        LOG_ERROR("Several instructions 'call sub_10003dcb5'");
+        return 0;
+    }
+    return patch_place - text_section;
+}
+
+
 static uint64_t find_small_double(uint64_t from)
 {
     char pattern[] = "aaaa";
@@ -429,12 +495,17 @@ int main(int argc, char **argv)
             LOG_ERROR("Unable to dump loginwindow __text section");
             continue;
         }
-        uint64_t patch_place = find_patch_place();
+        /*
+        uint64_t patch_place = find_patch_place(); // search for movsd xmm0,[adress]
+        */
+        uint64_t patch_place = find_patch_place2(); // search for call sub_10003dcb5
         if (patch_place == 0)
         {
             continue;
         }
-        printf("Found potential timer setup at %016llx\n", (base_address + text_offset + patch_place));
+        printf("Found potential sleep start at %016llx\n", (base_address + text_offset + patch_place));
+
+        /*
         uint64_t gadget = find_small_double(patch_place + 8);
         if (gadget == 0)
         {
@@ -446,6 +517,15 @@ int main(int argc, char **argv)
             LOG_ERROR("Unable to patch loginwindow memory");
             continue;
         }
+        */
+        
+        char new_code[8] = {0x90,0x90,0x90,0x90,0x90,0xEB,0x6D,0x48}; // 5 x 'NOP' and 3 bytes of original code
+        if (!write_memory_char_n(base_address + text_offset + patch_place, 8, new_code))
+        {
+            LOG_ERROR("Unable to patch loginwindow memory for sleep start");
+            continue;
+        }
+        
         printf("\n");
     }
     puts("All done.");
