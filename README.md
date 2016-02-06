@@ -1,3 +1,11 @@
+Update
+======
+Since 10.9.2 update this patch is not longer needed. You can go back to pre-Mavericks power button behavior just by open an Terminal and using the following command:
+"defaults write com.apple.loginwindow PowerButtonSleepsSystem -bool no"
+
+(source: http://hints.macworld.com/article.php?story=20140305140635280)
+
+
 power_fixer
 ===========
 
